@@ -64,6 +64,11 @@
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
 
+#include <android/log.h>
+#define LOG_TAG "SEEKAUDIO"
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__))
+
+#define AEC_TEST 1
 #define RETURN_ON_ERR(expr) \
   do {                      \
     int err = (expr);       \
@@ -500,6 +505,15 @@ AudioProcessingImpl::AudioProcessingImpl(
 
   RTC_LOG(LS_INFO) << "AudioProcessing: " << config_.ToString();
 
+#if AEC_TEST
+  config_.seek_audio_aec.enabled = true;
+  config_.seek_audio_aec.suppress_level = 35;
+  config_.seek_audio_aec.echo_level = 35;
+#else
+  config_.seek_audio_afc.enabled = true;
+  config_.seek_audio_aec.suppress_level = 35;
+#endif
+
   // Mark Echo Controller enabled if a factory is injected.
   capture_nonlocked_.echo_controller_enabled =
       static_cast<bool>(echo_control_factory_);
@@ -570,6 +584,27 @@ void AudioProcessingImpl::InitializeLocked() {
     render_.render_converter.reset(nullptr);
   }
 
+  agc_in_audio.reset(new AudioBuffer(
+	  formats_.api_format.input_stream().sample_rate_hz(),
+	  formats_.api_format.input_stream().num_channels(),
+	  capture_nonlocked_.capture_processing_format.sample_rate_hz(),
+	  formats_.api_format.output_stream().num_channels(),
+	  formats_.api_format.output_stream().sample_rate_hz(),
+	  formats_.api_format.output_stream().num_channels()));
+  SetDownmixMethod(*agc_in_audio,
+	  config_.pipeline.capture_downmix_method);
+
+  agc_out_audio.reset(new AudioBuffer(
+	  formats_.api_format.input_stream().sample_rate_hz(),
+	  formats_.api_format.input_stream().num_channels(),
+	  capture_nonlocked_.capture_processing_format.sample_rate_hz(),
+	  formats_.api_format.output_stream().num_channels(),
+	  formats_.api_format.output_stream().sample_rate_hz(),
+	  formats_.api_format.output_stream().num_channels()));
+  SetDownmixMethod(*agc_out_audio,
+	  config_.pipeline.capture_downmix_method);
+
+
   capture_.capture_audio.reset(new AudioBuffer(
       formats_.api_format.input_stream().sample_rate_hz(),
       formats_.api_format.input_stream().num_channels(),
@@ -595,6 +630,76 @@ void AudioProcessingImpl::InitializeLocked() {
   } else {
     capture_.capture_fullband_audio.reset();
   }
+#if AEC_TEST  
+  if (config_.seek_audio_aec.enabled) {
+	  LOGI("Initializing SeekAudio AEC module");
+	  if (!submodules_.seek_audio_aec) {
+		  submodules_.seek_audio_aec = std::make_unique<SeekAudioAec>();
+	  }
+
+	  if (!config_.seek_audio_aec.log_directory.empty()) {
+		  LOGI("Opening AEC log in directory: %s", config_.seek_audio_aec.log_directory.c_str());
+		  if (submodules_.seek_audio_aec->ProcessOpenLog(config_.seek_audio_aec.log_directory.c_str()) != 0) {
+			  LOGW("Failed to open SeekAudioAEC log");
+		  }
+		  else {
+			  LOGI("AEC log opened successfully");
+		  }
+	  }
+
+	  bool aec_initialized = submodules_.seek_audio_aec->Initialize(16000);//only support 16k samplerate
+	  submodules_.seek_audio_aec->SetSuppressPowerHowl(config_.seek_audio_aec.suppress_level);
+	  submodules_.seek_audio_aec->SetSuppressPowerEcho(config_.seek_audio_aec.echo_level);
+
+	  if (!aec_initialized) {
+		  LOGW("SeekAudio AEC initialization failed, disabling module");
+		  submodules_.seek_audio_aec.reset();
+	  }
+	  else {
+		  LOGI("SeekAudio AEC module initialized successfully");
+	  }
+  }
+  else {
+	  LOGI("SeekAudio AEC disabled by configuration");
+	  submodules_.seek_audio_aec.reset();
+  }
+#else
+  if (config_.seek_audio_afc.enabled) {
+      LOGI("Initializing SeekAudio AFC module");
+      if (!submodules_.seek_audio_afc) {
+          submodules_.seek_audio_afc = std::make_unique<SeekAudioAfc>();
+      }
+
+	  if (!config_.seek_audio_afc.log_directory.empty()) {
+		  LOGI("Opening AFC log in directory: %s", config_.seek_audio_afc.log_directory.c_str());
+		  if (submodules_.seek_audio_afc->ProcessOpenLog(config_.seek_audio_afc.log_directory.c_str()) != 0) {
+			  LOGW("Failed to open SeekAudioAFC log");
+		  }
+		  else {
+			  LOGI("AFC log opened successfully");
+		  }
+	  }
+
+      bool afc_initialized = submodules_.seek_audio_afc->Initialize(
+          16000 ,
+          formats_.api_format.input_stream().num_channels());
+
+	  submodules_.seek_audio_afc->SetSuppressPowerHowl(config_.seek_audio_afc.suppress_level);
+	  
+
+      if (!afc_initialized) {
+          LOGW("SeekAudio AFC initialization failed, disabling module");
+          submodules_.seek_audio_afc.reset();
+      }
+      else {
+          LOGI("SeekAudio AFC module initialized successfully");
+      }
+  }
+  else {
+      LOGI("SeekAudio AFC disabled by configuration");
+      submodules_.seek_audio_afc.reset();
+  }
+#endif
 
   AllocateRenderQueue();
 
@@ -1423,6 +1528,45 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
       submodules_.noise_suppressor->Process(capture_buffer);
     }
   }
+#if AEC_TEST
+  if (submodules_.seek_audio_aec) {
+
+	  //LOGI("Calling SeekAudio AEC processing,num_frames_per_band:%d,num_frames:%d", capture_buffer->num_frames_per_band(), capture_buffer->num_frames());
+
+	  if (capture_buffer->num_frames_per_band() == 160) {		  
+		  submodules_.seek_audio_aec->ProcessCaptureAudio(
+			  capture_buffer->split_bands(0), capture_buffer->num_frames_per_band());
+
+		  float howling_prob = submodules_.seek_audio_aec->GetHowlingProbability();
+		  if (howling_prob > 0.9f) {
+			  LOGW("High howling probability detected: %.3f", howling_prob);
+		  }
+	  }
+	  else {
+		  LOGW("Audio frame size mismatch: expected 160, got %d", capture_buffer->num_frames_per_band());
+	  }
+  }
+#else
+  if (submodules_.seek_audio_afc) {
+
+      //LOGI("Calling SeekAudio AFC processing,num_frames_per_band:%d,num_frames:%d", capture_buffer->num_frames_per_band(), capture_buffer->num_frames());
+      
+      if (capture_buffer->num_frames_per_band() == 160) {
+          submodules_.seek_audio_afc->ProcessCaptureAudio(
+              capture_buffer->split_bands(0), capture_buffer->num_frames_per_band());
+
+          float howling_prob = submodules_.seek_audio_afc->GetHowlingProbability();
+          if (howling_prob > 0.9f) {
+              LOGW("High howling probability detected: %.3f", howling_prob);
+          }
+      }
+      else {
+          LOGW("Audio frame size mismatch: expected 160, got %d", capture_buffer->num_frames_per_band());
+      }
+  }
+#endif
+
+  capture_buffer->CopyTo(agc_in_audio.get());
 
   if (submodules_.agc_manager) {
     submodules_.agc_manager->Process(*capture_buffer);
@@ -1513,6 +1657,24 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
         ec_metrics.echo_return_loss_enhancement;
     capture_.stats.delay_ms = ec_metrics.delay_ms;
   }
+
+  capture_buffer->CopyTo(agc_out_audio.get());
+
+#if 0
+#if AEC_TEST
+  if (submodules_.seek_audio_aec && capture_nonlocked_.capture_processing_format.sample_rate_hz() == 16000 && capture_buffer->num_frames() == 160)
+  {
+	  submodules_.seek_audio_aec->ProcessAGCCompensate(agc_in_audio->channels(), agc_out_audio->channels(),
+		  capture_buffer->channels(), capture_buffer->num_frames());
+  }
+#else
+  if (submodules_.seek_audio_afc && capture_nonlocked_.capture_processing_format.sample_rate_hz() == 16000 && capture_buffer->num_frames() == 160)
+  {
+	submodules_.seek_audio_afc->ProcessAGCCompensate(agc_in_audio->channels(), agc_out_audio->channels(),
+			  capture_buffer->channels(), capture_buffer->num_frames());
+  }
+#endif
+#endif
 
   // Pass stats for reporting.
   stats_reporter_.UpdateStatistics(capture_.stats);
@@ -1671,6 +1833,12 @@ int AudioProcessingImpl::ProcessRenderStreamLocked() {
   if (submodule_states_.RenderMultiBandSubModulesActive()) {
     QueueBandedRenderAudio(render_buffer);
   }
+
+#if AEC_TEST
+  if (submodules_.seek_audio_aec) {
+	  submodules_.seek_audio_aec->BufferFarend(render_buffer->split_bands(0), render_buffer->num_frames_per_band());
+  }
+#endif
 
   // TODO(peah): Perform the queuing inside QueueRenderAudiuo().
   if (submodules_.echo_controller) {

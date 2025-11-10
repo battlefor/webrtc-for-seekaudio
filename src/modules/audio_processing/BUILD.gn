@@ -159,6 +159,10 @@ rtc_library("audio_processing") {
     "echo_control_mobile_impl.h",
     "gain_control_impl.cc",
     "gain_control_impl.h",
+    "seek_audio_afc.cc",
+    "seek_audio_afc.h",
+    "seek_audio_aec.cc",
+    "seek_audio_aec.h",
     "render_queue_item_verifier.h",
   ]
 

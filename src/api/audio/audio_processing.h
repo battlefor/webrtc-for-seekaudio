@@ -379,6 +379,26 @@ class RTC_EXPORT AudioProcessing : public RefCountInterface {
       } fixed_digital;
     } gain_controller2;
 
+    struct SeekAudioAfc {
+      SeekAudioAfc() = default;
+      bool enabled = false;
+      int suppress_level = 0;
+      int echo_level = 0;
+      std::string log_directory;
+      std::string library_path; 
+    };
+    SeekAudioAfc seek_audio_afc;
+
+    struct SeekAudioAec {
+      SeekAudioAec() = default;
+      bool enabled = false;
+      int suppress_level = 0;
+      int echo_level = 0;
+      std::string log_directory;
+      std::string library_path;
+    };
+    SeekAudioAec seek_audio_aec;
+
     std::string ToString() const;
   };
 

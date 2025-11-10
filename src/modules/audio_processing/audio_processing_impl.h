@@ -44,6 +44,8 @@
 #include "modules/audio_processing/post_filter.h"
 #include "modules/audio_processing/render_queue_item_verifier.h"
 #include "modules/audio_processing/rms_level.h"
+#include "modules/audio_processing/seek_audio_afc.h"
+#include "modules/audio_processing/seek_audio_aec.h"
 #include "rtc_base/gtest_prod_util.h"
 #include "rtc_base/swap_queue.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -387,6 +389,8 @@ class AudioProcessingImpl : public AudioProcessing {
     std::unique_ptr<NoiseSuppressor> noise_suppressor;
     std::unique_ptr<PostFilter> post_filter;
     std::unique_ptr<CaptureLevelsAdjuster> capture_levels_adjuster;
+    std::unique_ptr<SeekAudioAfc> seek_audio_afc;
+    std::unique_ptr<SeekAudioAec> seek_audio_aec;
   } submodules_;
 
   // State that is written to while holding both the render and capture locks
@@ -492,6 +496,9 @@ class AudioProcessingImpl : public AudioProcessing {
     AudioProcessingStats cached_stats_ RTC_GUARDED_BY(mutex_stats_);
     SwapQueue<AudioProcessingStats> stats_message_queue_;
   } stats_reporter_;
+
+  std::unique_ptr<AudioBuffer> agc_in_audio;
+  std::unique_ptr<AudioBuffer> agc_out_audio;
 
   std::vector<int16_t> aecm_render_queue_buffer_ RTC_GUARDED_BY(mutex_render_);
   std::vector<int16_t> aecm_capture_queue_buffer_
