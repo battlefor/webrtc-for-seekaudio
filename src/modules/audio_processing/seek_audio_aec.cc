@@ -30,6 +30,8 @@ SeekAudioAec::SeekAudioAec() {
     return;
   }
 
+  is_initialized_ = false;
+  is_log_opened = false;
   LOGI("AEC handle created successfully");
   LOGI("SeekAudioAec created successfully");
 }
@@ -155,6 +157,8 @@ void SeekAudioAec::SetSuppressPowerEcho(int level)
 }
 
 bool SeekAudioAec::Initialize(int sample_rate_hz) {
+  if (is_initialized_)
+        return true;
   LOGI("SeekAudioAec::Initialize called: sample_rate=%d", sample_rate_hz);
   
   RTC_DCHECK_GT(sample_rate_hz, 0);
@@ -295,6 +299,10 @@ void SeekAudioAec::ProcessAGCCompensate(float* const* agcIn, float* const* agcOu
 
 int SeekAudioAec::ProcessOpenLog(const char* folder_path) {
   int ret = 0;
+
+  if (is_log_opened)
+      return ret;
+
   if (!aec_handle_ || !aec_open_log_) {
     LOGE("AEC ProcessOpenLog function failed");
     return -1;
@@ -304,8 +312,9 @@ int SeekAudioAec::ProcessOpenLog(const char* folder_path) {
 
   if (ret != 0) {
     LOGE("AEC ProcessOpenLog function failed, ret: %d", ret);
+    return ret;
   }
-
+  is_log_opened = true;
   return ret;
 }
 

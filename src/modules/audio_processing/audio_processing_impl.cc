@@ -69,6 +69,8 @@
 #define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__))
 
 #define AEC_TEST 1
+#define LOG_TEST 0
+
 #define RETURN_ON_ERR(expr) \
   do {                      \
     int err = (expr);       \
@@ -636,7 +638,7 @@ void AudioProcessingImpl::InitializeLocked() {
 	  if (!submodules_.seek_audio_aec) {
 		  submodules_.seek_audio_aec = std::make_unique<SeekAudioAec>();
 	  }
-
+#if LOG_TEST
 	  if (!config_.seek_audio_aec.log_directory.empty()) {
 		  LOGI("Opening AEC log in directory: %s", config_.seek_audio_aec.log_directory.c_str());
 		  if (submodules_.seek_audio_aec->ProcessOpenLog(config_.seek_audio_aec.log_directory.c_str()) != 0) {
@@ -646,6 +648,7 @@ void AudioProcessingImpl::InitializeLocked() {
 			  LOGI("AEC log opened successfully");
 		  }
 	  }
+#endif
 
 	  bool aec_initialized = submodules_.seek_audio_aec->Initialize(16000);//only support 16k samplerate
 	  submodules_.seek_audio_aec->SetSuppressPowerHowl(config_.seek_audio_aec.suppress_level);
@@ -670,6 +673,7 @@ void AudioProcessingImpl::InitializeLocked() {
           submodules_.seek_audio_afc = std::make_unique<SeekAudioAfc>();
       }
 
+#if LOG_TEST
 	  if (!config_.seek_audio_afc.log_directory.empty()) {
 		  LOGI("Opening AFC log in directory: %s", config_.seek_audio_afc.log_directory.c_str());
 		  if (submodules_.seek_audio_afc->ProcessOpenLog(config_.seek_audio_afc.log_directory.c_str()) != 0) {
@@ -679,12 +683,13 @@ void AudioProcessingImpl::InitializeLocked() {
 			  LOGI("AFC log opened successfully");
 		  }
 	  }
+#endif
 
       bool afc_initialized = submodules_.seek_audio_afc->Initialize(
           16000 ,
           formats_.api_format.input_stream().num_channels());
 
-	  submodules_.seek_audio_afc->SetSuppressPowerHowl(config_.seek_audio_afc.suppress_level);
+	  submodules_.seek_audio_afc->SetSuppressPower(config_.seek_audio_afc.suppress_level);
 	  
 
       if (!afc_initialized) {

@@ -6,6 +6,7 @@
 #include "common_audio/include/audio_util.h"
 
 #include <dlfcn.h>  // dlopen, dlsym, dlclose
+#define SEEKAUDIO_SAT(a, b, c)         (b > a ? a : b < c ? c : b)
 
 namespace webrtc {
 
@@ -30,7 +31,8 @@ SeekAudioAfc::SeekAudioAfc()
       LOGE("Failed to create AFC handle");
       return;
   }
-
+  is_initialized_ = false;
+  is_log_opened = false;
   LOGI("SeekAudioAfc created successfully");
 }
 
@@ -67,9 +69,7 @@ bool SeekAudioAfc::LoadLibrary() {
   afc_open_log_ = reinterpret_cast<AFC_OpenLogFunc>(GetFunctionPointer("SeekAudioAFC_OpenLog"));
   afc_init_ = reinterpret_cast<AFC_InitFunc>(GetFunctionPointer("SeekAudioAFC_Init"));
   afc_process_ = reinterpret_cast<AFC_ProcessFunc>(GetFunctionPointer("SeekAudioAFC_Process"));
-  afc_process_short_ = reinterpret_cast<AFC_ProcessShortFunc>(GetFunctionPointer("SeekAudioAFC_Process_Short"));
   afc_agc_compensate_ = reinterpret_cast<AFC_AGC_CompensateFunc>(GetFunctionPointer("SeekAudioAFC_AGC_Compensate"));
-  afc_agc_compensate_short_ = reinterpret_cast<AFC_AGC_CompensateShortFunc>(GetFunctionPointer("SeekAudioAFC_AGC_Compensate_Short"));
   afc_get_howling_status_ = reinterpret_cast<AFC_GetHowlingStatusFunc>(GetFunctionPointer("SeekAudioAFC_GetHowlingStatus"));
   afc_set_power_ = reinterpret_cast<AFC_SetPowerFunc>(GetFunctionPointer("SeekAudioAFC_Set_AI_Engine_Power"));
 
@@ -96,9 +96,7 @@ void SeekAudioAfc::UnloadLibrary() {
     afc_init_ = nullptr;
 	afc_set_power_ = nullptr;
     afc_process_ = nullptr;
-    afc_process_short_ = nullptr;
     afc_agc_compensate_ = nullptr;
-    afc_agc_compensate_short_ = nullptr;
     afc_get_howling_status_ = nullptr;
     
     LOGI("AFC library unloaded");
@@ -139,6 +137,8 @@ void SeekAudioAfc::SetSuppressPower(int level)
 }
 
 bool SeekAudioAfc::Initialize(int sample_rate_hz, int num_channels) {
+  if (is_initialized_)
+		return true;
   LOGI("SeekAudioAfc::Initialize called: sample_rate=%d, channels=%d", 
        sample_rate_hz, num_channels);
   
@@ -187,6 +187,8 @@ bool SeekAudioAfc::Initialize(int sample_rate_hz, int num_channels) {
 
 int  SeekAudioAfc::ProcessOpenLog(const char *folderPath){
 	int ret = 0;
+	if (is_log_opened)
+		return ret;
 	if (!afc_handle_ || !afc_open_log_) {
 		LOGE("AFC ProcessOpenLog function failed");
 		return -1;
@@ -195,8 +197,12 @@ int  SeekAudioAfc::ProcessOpenLog(const char *folderPath){
 	ret = afc_open_log_(afc_handle_, folderPath);
 
 	if (ret != 0)
+	{
 		LOGE("AFC ProcessOpenLog function failed,ret:%d", ret);
+		return ret;
+	}
 
+	is_log_opened = true;
 	return ret;
 }
 
@@ -212,18 +218,32 @@ void SeekAudioAfc::ProcessAGCCompensate(float* const* agc_in, float* const* agc_
 		LOGW("AFC requires 10ms frames (160 samples), got %d samples", samples_per_channel);
 		return;
 	}
-        LOGI("Processing com audio");
 
-	float* output_frame = data[0];
-	float input_frame[160];
-	float agc_in_frame[160];
-	float agc_out_frame[160];
+	int i = 0;
+	float* tempframe = data[0];
+	float* agcframeIn = agc_in[0];
+	float* agcframeOut = agc_out[0];
 
-	memcpy(input_frame, output_frame, sizeof(float) * samples_per_channel);
-	memcpy(agc_in_frame, agc_in[0], sizeof(float) * samples_per_channel);
-	memcpy(agc_out_frame, agc_out[0], sizeof(float) * samples_per_channel);
+	short input_frame[160];
+	short output_frame[160];
+	short agc_in_frame[160];
+	short agc_out_frame[160];
+
+	for (i = 0; i < 160; i++)
+	{
+		input_frame[i] = SEEKAUDIO_SAT(32767, tempframe[i], -32768);
+		agc_in_frame[i] = SEEKAUDIO_SAT(32767, agcframeIn[i], -32768);
+		agc_out_frame[i] = SEEKAUDIO_SAT(32767, agcframeOut[i], -32768);
+		output_frame[i] = 0;
+	}
 
 	afc_agc_compensate_(afc_handle_, agc_in_frame, agc_out_frame, input_frame, output_frame);
+
+
+	for (i = 0; i < 160; i++)
+	{
+		tempframe[i] = (float)output_frame[i];
+	}
 
 }
 
@@ -240,13 +260,23 @@ void SeekAudioAfc::ProcessCaptureAudio(float* const* data, int samples_per_chann
   }
   
   //LOGI("Processing capture audio: %d samples",samples_per_channel);
-  
-  float* output_frame = data[0];
-  float input_frame[160];
-  memcpy(input_frame, output_frame, sizeof(float) * samples_per_channel);
+  int i = 0;
+  float* temp_frame = data[0];
+  short input_frame[160];
+  short output_frame[160];
+  for (i = 0; i < 160; i++)
+  {
+	  input_frame[i] = SEEKAUDIO_SAT(32767, temp_frame[i], -32768);
+	  output_frame[i] = 0;
+  }
+
   afc_process_(afc_handle_, input_frame, output_frame);
 
-  //LOGI("Capture audio processing completed");
+  for (i = 0; i < 160; i++)
+  {
+	  temp_frame[i] =(float)output_frame[i];
+  }
+
 }
 
 float SeekAudioAfc::GetHowlingProbability() const {

@@ -49,10 +49,8 @@ class SeekAudioAfc {
   typedef int (*AFC_OpenLogFunc)(void*, const char*);
   typedef int (*AFC_InitFunc)(void*, int);
   typedef void(*AFC_SetPowerFunc)(void*, int);
-  typedef void (*AFC_ProcessFunc)(void*, const float*, float*);
-  typedef void (*AFC_ProcessShortFunc)(void*, const short*, short*);
-  typedef void (*AFC_AGC_CompensateFunc)(void*, const float*, const float*, const float*, float*);
-  typedef void (*AFC_AGC_CompensateShortFunc)(void*, const short*, const short*, const short*, short*);
+  typedef void (*AFC_ProcessFunc)(void*, const short*, short*);
+  typedef void (*AFC_AGC_CompensateFunc)(void*, const short*, const short*, const short*, short*);
   typedef float (*AFC_GetHowlingStatusFunc)(void*);
 
   // 函数指针声明
@@ -62,15 +60,14 @@ class SeekAudioAfc {
   AFC_InitFunc afc_init_ = nullptr;
   AFC_SetPowerFunc afc_set_power_ = nullptr;
   AFC_ProcessFunc afc_process_ = nullptr;
-  AFC_ProcessShortFunc afc_process_short_ = nullptr;
   AFC_AGC_CompensateFunc afc_agc_compensate_ = nullptr;
-  AFC_AGC_CompensateShortFunc afc_agc_compensate_short_ = nullptr;
   AFC_GetHowlingStatusFunc afc_get_howling_status_ = nullptr;
 
   // 动态库句柄
   void* library_handle_ = nullptr;
   
   bool is_initialized_ = false;
+  bool is_log_opened = false;
   int sample_rate_hz_ = 0;
   
   void* afc_handle_ = nullptr;  // 使用void*代替具体的AFCHandle*

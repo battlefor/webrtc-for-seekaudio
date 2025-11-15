@@ -78,6 +78,7 @@ class SeekAudioAec {
   void* library_handle_ = nullptr;
   
   bool is_initialized_ = false;
+  bool is_log_opened = false;
   int sample_rate_hz_ = 0;
   
   void* aec_handle_ = nullptr; 
